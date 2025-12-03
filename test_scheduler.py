@@ -1,5 +1,7 @@
-#!/usr/bin/env python3
-"""Quick test of the genetic scheduler"""
+"""
+Quick test of the genetic scheduler
+Created by: Cole Hanson
+"""
 
 import sys
 sys.path.insert(0, '/home/user/Program2-Genetic-Algorithm')

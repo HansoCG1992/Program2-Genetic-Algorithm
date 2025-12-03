@@ -1,7 +1,7 @@
-#!/usr/bin/env python3
 """
-Genetic Algorithm for Course Scheduling
-Implements a GA to optimize course schedules based on multiple constraints
+Genetic Algorithm for SLA Course Scheduling
+This Program implements a GA to optimize course schedules based on multiple constraints
+Created by: Cole Hanson
 """
 
 import numpy as np
@@ -10,7 +10,7 @@ from typing import List, Tuple, Dict
 import random
 from datetime import datetime
 
-# Use cryptographically stronger random generator as suggested
+# stronger random generator
 rng = np.random.Generator(np.random.PCG64())
 
 
@@ -50,7 +50,7 @@ ACTIVITIES = [
     Activity("SLA303", 25, ["Glen", "Zeldin"], ["Banks"]),
     Activity("SLA304", 20, ["Singer", "Uther"], ["Richards"]),
     Activity("SLA394", 15, ["Tyler", "Singer"], ["Richards", "Zeldin"]),
-    Activity("SLA449", 30, ["Tyler", "Zeldin", "Uther"], ["Shaw"]),
+    Activity("SLA449", 30, ["Tyler", "Zeldin", "Uther"], ["Zeldin", "Shaw"]),
     Activity("SLA451", 90, ["Lock", "Banks", "Zeldin"], ["Tyler", "Singer", "Shaw", "Glen"])
 ]
 

@@ -18,6 +18,7 @@ ENV/
 .idea/
 *.swp
 *.swo
+.vs/
 
 # Output files
 best_schedule.txt
