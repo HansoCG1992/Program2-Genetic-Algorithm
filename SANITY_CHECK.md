@@ -57,17 +57,22 @@
 
 ---
 
-### ❌ ACTUAL ISSUES FOUND
+### ✅ ISSUES FIXED (as of latest commit)
 
-**1. INCOMPLETE: Facilitator Consecutive Time Slots** (lines 174-180)
-   - Code detects consecutive slots but has `pass` - doesn't apply the +0.5 bonus
-   - Assignment says: "If any facilitator scheduled for consecutive time slots: Same rules as for SLA 191 and SLA 101"
-   - This means: consecutive = +0.5, but if activities are in different buildings (one in Roman/Beach, other not) = -0.4
+**1. FIXED: Facilitator Consecutive Time Slots** (lines 174-206)
+   - Now properly applies +0.5 bonus for consecutive slots
+   - Checks building separation (Roman/Beach) and applies -0.4 penalty
+   - Fully implements: "Same rules as for SLA 191 and SLA 101"
 
-**2. MINOR: SLA449 Data Discrepancy**
-   - Appendix A lists "Other facilitators: Zeldin, Shaw" but Zeldin is already in preferred
-   - Code has only ["Shaw"] in other - this is logically correct but deviates from literal spec
-   - Recommend: Ask user if this should be ["Zeldin", "Shaw"] to match spec exactly
+**2. FIXED: SLA449 Data** (line 53)
+   - Updated to match Appendix A exactly: ["Zeldin", "Shaw"] in other_facilitators
+   - Now matches literal specification
+
+**3. ADDED: Constraint Violations Breakdown**
+   - New function get_constraint_violations() provides detailed counts
+   - Output file shows complete breakdown of all constraint types
+   - Console shows summary of key violations
+   - Helps identify specific problems in generated schedules
 
 ---
 
