@@ -50,7 +50,7 @@ ACTIVITIES = [
     Activity("SLA303", 25, ["Glen", "Zeldin"], ["Banks"]),
     Activity("SLA304", 20, ["Singer", "Uther"], ["Richards"]),
     Activity("SLA394", 15, ["Tyler", "Singer"], ["Richards", "Zeldin"]),
-    Activity("SLA449", 30, ["Tyler", "Zeldin", "Uther"], ["Shaw"]),
+    Activity("SLA449", 30, ["Tyler", "Zeldin", "Uther"], ["Zeldin", "Shaw"]),
     Activity("SLA451", 90, ["Lock", "Banks", "Zeldin"], ["Tyler", "Singer", "Shaw", "Glen"])
 ]
 
@@ -177,7 +177,33 @@ def calculate_fitness(schedule: Schedule) -> float:
         for i in range(len(sorted_times) - 1):
             if sorted_times[i+1] - sorted_times[i] == 1:
                 # Facilitator has consecutive time slots - apply SLA 191/101 rules
-                pass  # Will be handled in activity-specific section
+                time1 = sorted_times[i]
+                time2 = sorted_times[i+1]
+
+                # Find activities at these times for this facilitator
+                activities_at_time1 = [act_idx for act_idx, (_, r, t, f) in enumerate(schedule.assignments)
+                                      if t == time1 and f == facilitator_idx]
+                activities_at_time2 = [act_idx for act_idx, (_, r, t, f) in enumerate(schedule.assignments)
+                                      if t == time2 and f == facilitator_idx]
+
+                # Apply bonus for consecutive slots
+                fitness += 0.5
+
+                # Check building separation penalty
+                for act1_idx in activities_at_time1:
+                    for act2_idx in activities_at_time2:
+                        room1_idx = schedule.assignments[act1_idx][1]
+                        room2_idx = schedule.assignments[act2_idx][1]
+
+                        room1_name = ROOMS[room1_idx].name
+                        room2_name = ROOMS[room2_idx].name
+
+                        room1_in_roman_beach = room1_name.startswith("Roman") or room1_name.startswith("Beach")
+                        room2_in_roman_beach = room2_name.startswith("Roman") or room2_name.startswith("Beach")
+
+                        # If one is in Roman/Beach and other isn't, penalize
+                        if room1_in_roman_beach != room2_in_roman_beach:
+                            fitness -= 0.4
 
     # Activity-specific constraints
     sla101a_idx = next(i for i, a in enumerate(ACTIVITIES) if a.name == "SLA101A")
@@ -240,6 +266,178 @@ def calculate_fitness(schedule: Schedule) -> float:
     return fitness
 
 
+def get_constraint_violations(schedule: Schedule) -> Dict[str, int]:
+    """
+    Returns a dictionary of constraint violation counts for detailed reporting.
+    """
+    violations = {
+        "room_conflicts": 0,
+        "room_too_small": 0,
+        "room_too_large_1.5x": 0,
+        "room_too_large_3x": 0,
+        "room_good_fit": 0,
+        "facilitator_preferred": 0,
+        "facilitator_other": 0,
+        "facilitator_unlisted": 0,
+        "facilitator_single_slot": 0,
+        "facilitator_double_booked": 0,
+        "facilitator_overload_4plus": 0,
+        "facilitator_underload_less3": 0,
+        "facilitator_consecutive_bonus": 0,
+        "facilitator_consecutive_building_penalty": 0,
+        "sla101_sections_far_apart": 0,
+        "sla101_sections_same_time": 0,
+        "sla191_sections_far_apart": 0,
+        "sla191_sections_same_time": 0,
+        "sla101_191_consecutive": 0,
+        "sla101_191_consecutive_building_penalty": 0,
+        "sla101_191_separated_1hr": 0,
+        "sla101_191_same_time": 0
+    }
+
+    # Create lookup structures
+    time_room_activities = {}
+    time_facilitator_activities = {}
+    facilitator_total_activities = {}
+    facilitator_time_slots = {}
+
+    for activity_idx, (_, room_idx, time_idx, facilitator_idx) in enumerate(schedule.assignments):
+        key = (time_idx, room_idx)
+        if key not in time_room_activities:
+            time_room_activities[key] = []
+        time_room_activities[key].append(activity_idx)
+
+        key = (time_idx, facilitator_idx)
+        if key not in time_facilitator_activities:
+            time_facilitator_activities[key] = []
+        time_facilitator_activities[key].append(activity_idx)
+
+        facilitator_total_activities[facilitator_idx] = facilitator_total_activities.get(facilitator_idx, 0) + 1
+
+        if facilitator_idx not in facilitator_time_slots:
+            facilitator_time_slots[facilitator_idx] = []
+        if time_idx not in facilitator_time_slots[facilitator_idx]:
+            facilitator_time_slots[facilitator_idx].append(time_idx)
+
+    # Count violations per activity
+    for activity_idx, (_, room_idx, time_idx, facilitator_idx) in enumerate(schedule.assignments):
+        activity = ACTIVITIES[activity_idx]
+        room = ROOMS[room_idx]
+        facilitator = FACILITATORS[facilitator_idx]
+
+        # Room conflicts
+        if len(time_room_activities[(time_idx, room_idx)]) > 1:
+            violations["room_conflicts"] += 1
+
+        # Room size
+        if activity.enrollment > room.capacity:
+            violations["room_too_small"] += 1
+        elif room.capacity > 3 * activity.enrollment:
+            violations["room_too_large_3x"] += 1
+        elif room.capacity > 1.5 * activity.enrollment:
+            violations["room_too_large_1.5x"] += 1
+        else:
+            violations["room_good_fit"] += 1
+
+        # Facilitator preference
+        if facilitator in activity.preferred_facilitators:
+            violations["facilitator_preferred"] += 1
+        elif facilitator in activity.other_facilitators:
+            violations["facilitator_other"] += 1
+        else:
+            violations["facilitator_unlisted"] += 1
+
+        # Facilitator load per time slot
+        if len(time_facilitator_activities[(time_idx, facilitator_idx)]) == 1:
+            violations["facilitator_single_slot"] += 1
+        elif len(time_facilitator_activities[(time_idx, facilitator_idx)]) > 1:
+            violations["facilitator_double_booked"] += 1
+
+        # Facilitator total load
+        total_load = facilitator_total_activities[facilitator_idx]
+        if total_load > 4:
+            violations["facilitator_overload_4plus"] += 1
+        elif total_load < 3:
+            if facilitator != "Tyler" or total_load >= 2:
+                violations["facilitator_underload_less3"] += 1
+
+    # Check consecutive facilitator time slots
+    for facilitator_idx, time_slots in facilitator_time_slots.items():
+        sorted_times = sorted(time_slots)
+        for i in range(len(sorted_times) - 1):
+            if sorted_times[i+1] - sorted_times[i] == 1:
+                violations["facilitator_consecutive_bonus"] += 1
+
+                time1 = sorted_times[i]
+                time2 = sorted_times[i+1]
+
+                activities_at_time1 = [act_idx for act_idx, (_, r, t, f) in enumerate(schedule.assignments)
+                                      if t == time1 and f == facilitator_idx]
+                activities_at_time2 = [act_idx for act_idx, (_, r, t, f) in enumerate(schedule.assignments)
+                                      if t == time2 and f == facilitator_idx]
+
+                for act1_idx in activities_at_time1:
+                    for act2_idx in activities_at_time2:
+                        room1_idx = schedule.assignments[act1_idx][1]
+                        room2_idx = schedule.assignments[act2_idx][1]
+                        room1_name = ROOMS[room1_idx].name
+                        room2_name = ROOMS[room2_idx].name
+                        room1_in_roman_beach = room1_name.startswith("Roman") or room1_name.startswith("Beach")
+                        room2_in_roman_beach = room2_name.startswith("Roman") or room2_name.startswith("Beach")
+                        if room1_in_roman_beach != room2_in_roman_beach:
+                            violations["facilitator_consecutive_building_penalty"] += 1
+
+    # Activity-specific constraints
+    sla101a_idx = next(i for i, a in enumerate(ACTIVITIES) if a.name == "SLA101A")
+    sla101b_idx = next(i for i, a in enumerate(ACTIVITIES) if a.name == "SLA101B")
+    sla191a_idx = next(i for i, a in enumerate(ACTIVITIES) if a.name == "SLA191A")
+    sla191b_idx = next(i for i, a in enumerate(ACTIVITIES) if a.name == "SLA191B")
+
+    time_101a = schedule.assignments[sla101a_idx][2]
+    time_101b = schedule.assignments[sla101b_idx][2]
+    time_191a = schedule.assignments[sla191a_idx][2]
+    time_191b = schedule.assignments[sla191b_idx][2]
+
+    room_101a = schedule.assignments[sla101a_idx][1]
+    room_101b = schedule.assignments[sla101b_idx][1]
+    room_191a = schedule.assignments[sla191a_idx][1]
+    room_191b = schedule.assignments[sla191b_idx][1]
+
+    # SLA 101 sections spacing
+    if abs(time_101a - time_101b) > 4:
+        violations["sla101_sections_far_apart"] += 1
+    if time_101a == time_101b:
+        violations["sla101_sections_same_time"] += 1
+
+    # SLA 191 sections spacing
+    if abs(time_191a - time_191b) > 4:
+        violations["sla191_sections_far_apart"] += 1
+    if time_191a == time_191b:
+        violations["sla191_sections_same_time"] += 1
+
+    # SLA 101 and 191 interactions
+    for sla191_idx, sla191_time, sla191_room in [(sla191a_idx, time_191a, room_191a),
+                                                    (sla191b_idx, time_191b, room_191b)]:
+        for sla101_idx, sla101_time, sla101_room in [(sla101a_idx, time_101a, room_101a),
+                                                       (sla101b_idx, time_101b, room_101b)]:
+            time_diff = abs(sla191_time - sla101_time)
+
+            if time_diff == 1:
+                violations["sla101_191_consecutive"] += 1
+                sla191_room_name = ROOMS[sla191_room].name
+                sla101_room_name = ROOMS[sla101_room].name
+                sla191_in_roman_beach = sla191_room_name.startswith("Roman") or sla191_room_name.startswith("Beach")
+                sla101_in_roman_beach = sla101_room_name.startswith("Roman") or sla101_room_name.startswith("Beach")
+                if sla191_in_roman_beach != sla101_in_roman_beach:
+                    violations["sla101_191_consecutive_building_penalty"] += 1
+            elif time_diff == 2:
+                violations["sla101_191_separated_1hr"] += 1
+            elif time_diff == 0:
+                violations["sla101_191_same_time"] += 1
+
+    return violations
+
+
 def mutate(schedule: Schedule, mutation_rate: float) -> Schedule:
     """
     Applies mutation to a schedule.
@@ -294,13 +492,57 @@ def crossover(parent1: Schedule, parent2: Schedule) -> Tuple[Schedule, Schedule]
 
 
 def print_schedule(schedule: Schedule, filename: str = "best_schedule.txt"):
-    """Prints the schedule to a file"""
+    """Prints the schedule to a file with constraint violations breakdown"""
+    fitness = calculate_fitness(schedule)
+    violations = get_constraint_violations(schedule)
+
     with open(filename, 'w') as f:
         f.write("=" * 80 + "\n")
         f.write("OPTIMIZED COURSE SCHEDULE\n")
+        f.write("=" * 80 + "\n")
+        f.write(f"Overall Fitness Score: {fitness:.4f}\n")
         f.write("=" * 80 + "\n\n")
 
-        # Sort by time for better readability
+        # Print constraint violations breakdown
+        f.write("CONSTRAINT VIOLATIONS BREAKDOWN\n")
+        f.write("-" * 80 + "\n")
+
+        f.write("\nRoom Constraints:\n")
+        f.write(f"  Room conflicts (double-booked): {violations['room_conflicts']}\n")
+        f.write(f"  Room too small: {violations['room_too_small']}\n")
+        f.write(f"  Room too large (>3x): {violations['room_too_large_3x']}\n")
+        f.write(f"  Room too large (>1.5x): {violations['room_too_large_1.5x']}\n")
+        f.write(f"  Room good fit: {violations['room_good_fit']}\n")
+
+        f.write("\nFacilitator Preferences:\n")
+        f.write(f"  Preferred facilitator: {violations['facilitator_preferred']}\n")
+        f.write(f"  Other listed facilitator: {violations['facilitator_other']}\n")
+        f.write(f"  Unlisted facilitator: {violations['facilitator_unlisted']}\n")
+
+        f.write("\nFacilitator Load:\n")
+        f.write(f"  Single activity in time slot: {violations['facilitator_single_slot']}\n")
+        f.write(f"  Double-booked in time slot: {violations['facilitator_double_booked']}\n")
+        f.write(f"  Overloaded (>4 activities): {violations['facilitator_overload_4plus']}\n")
+        f.write(f"  Underloaded (<3 activities): {violations['facilitator_underload_less3']}\n")
+        f.write(f"  Consecutive time slots (bonus): {violations['facilitator_consecutive_bonus']}\n")
+        f.write(f"  Consecutive different buildings (penalty): {violations['facilitator_consecutive_building_penalty']}\n")
+
+        f.write("\nActivity-Specific Constraints:\n")
+        f.write(f"  SLA 101 sections >4 hrs apart (bonus): {violations['sla101_sections_far_apart']}\n")
+        f.write(f"  SLA 101 sections same time (penalty): {violations['sla101_sections_same_time']}\n")
+        f.write(f"  SLA 191 sections >4 hrs apart (bonus): {violations['sla191_sections_far_apart']}\n")
+        f.write(f"  SLA 191 sections same time (penalty): {violations['sla191_sections_same_time']}\n")
+        f.write(f"  SLA 101/191 consecutive (bonus): {violations['sla101_191_consecutive']}\n")
+        f.write(f"  SLA 101/191 consecutive diff buildings (penalty): {violations['sla101_191_consecutive_building_penalty']}\n")
+        f.write(f"  SLA 101/191 separated by 1 hr (bonus): {violations['sla101_191_separated_1hr']}\n")
+        f.write(f"  SLA 101/191 same time (penalty): {violations['sla101_191_same_time']}\n")
+
+        f.write("\n" + "=" * 80 + "\n\n")
+
+        # Print schedule sorted by time
+        f.write("SCHEDULE BY TIME SLOT\n")
+        f.write("=" * 80 + "\n")
+
         sorted_assignments = sorted(enumerate(schedule.assignments),
                                    key=lambda x: (x[1][2], x[1][1]))
 
@@ -461,6 +703,19 @@ def run_genetic_algorithm():
     print(f"Best Fitness: {best_fitness_final:.4f}")
     print(f"Average Fitness: {np.mean(final_fitness_scores):.4f}")
     print(f"Worst Fitness: {min(final_fitness_scores):.4f}")
+
+    # Print constraint violations summary
+    violations = get_constraint_violations(best_schedule)
+    print("\n" + "-" * 80)
+    print("CONSTRAINT VIOLATIONS SUMMARY (Best Schedule)")
+    print("-" * 80)
+    print(f"Room conflicts: {violations['room_conflicts']}")
+    print(f"Room too small: {violations['room_too_small']}")
+    print(f"Facilitator double-booked: {violations['facilitator_double_booked']}")
+    print(f"Unlisted facilitators: {violations['facilitator_unlisted']}")
+    print(f"Facilitator overloaded (>4): {violations['facilitator_overload_4plus']}")
+    print(f"Facilitator underloaded (<3): {violations['facilitator_underload_less3']}")
+    print("-" * 80)
 
     # Save best schedule
     print("\nSaving best schedule to 'best_schedule.txt'...")
